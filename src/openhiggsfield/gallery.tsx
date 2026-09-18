@@ -7,9 +7,11 @@ import type { Surface } from "@/generation/catalog";
 
 import { swatchFor } from "./artwork";
 import { CROSS_VIEWS, SAMPLES, pickSamples, type GalleryView } from "./data";
+import type { UploadRecord } from "./uploads";
 import type { ActiveRun } from "./openhiggsfield-app";
 import {
   ArrowRightIcon,
+  AudioIcon,
   CheckIcon,
   DownloadIcon,
   HeartIcon,
@@ -31,8 +33,8 @@ const EMPTY: Record<GalleryView, { title: string; hint: string }> = {
     hint: "Describe the shot below, pick a model, press Generate. Every finished run stays in this browser.",
   },
   assets: {
-    title: "Nothing generated yet",
-    hint: "Image and video runs both land in this grid and stay in this browser.",
+    title: "Nothing here yet",
+    hint: "Files you upload or paste, and every image and video run, land in this grid and stay in this browser.",
   },
   favorites: {
     title: "Nothing kept yet",
@@ -53,10 +55,15 @@ const CARD_RATIO = 4 / 3;
 
 type Slot =
   | { key: string; kind: "run"; run: ActiveRun }
+  | { key: string; kind: "upload"; upload: UploadRecord }
   | { key: string; kind: "item"; item: RunRecord; index: number };
 
-function slotsOf(runs: ActiveRun[], items: RunRecord[]): Slot[] {
+/* Rendering runs lead, then the files the visitor brought, then what came back.
+   Uploads sit ahead of the results because they are the few things in this grid
+   that can be deleted from disk — and there are far fewer of them. */
+function slotsOf(runs: ActiveRun[], uploads: UploadRecord[], items: RunRecord[]): Slot[] {
   const slots: Slot[] = runs.map((run) => ({ key: run.id, kind: "run", run }));
+  for (const upload of uploads) slots.push({ key: `upload-${upload.id}`, kind: "upload", upload });
   items.forEach((item, index) => {
     if (item.status === "running") {
       slots.push({
@@ -333,6 +340,7 @@ export const Gallery = memo(function Gallery({
   surface,
   items,
   runs,
+  uploads,
   freshIds,
   picked,
   onOpen,
@@ -341,6 +349,7 @@ export const Gallery = memo(function Gallery({
   onFavorite,
   onDownload,
   onDelete,
+  onDeleteUpload,
   onStarter,
   galleryRef,
 }: {
@@ -348,6 +357,8 @@ export const Gallery = memo(function Gallery({
   surface: Surface;
   items: RunRecord[];
   runs: ActiveRun[];
+  /** Files the visitor saved; only the Assets scope shows them. */
+  uploads: UploadRecord[];
   freshIds: string[];
   picked: ReadonlySet<string>;
   onOpen: (id: string) => void;
@@ -356,6 +367,7 @@ export const Gallery = memo(function Gallery({
   onFavorite: (item: RunRecord) => void;
   onDownload: (item: RunRecord) => Promise<void>;
   onDelete: (item: RunRecord) => void;
+  onDeleteUpload: (upload: UploadRecord) => Promise<void>;
   onStarter: (prompt: string) => void;
   galleryRef: RefObject<HTMLDivElement | null>;
 }) {
@@ -367,7 +379,7 @@ export const Gallery = memo(function Gallery({
     className: "ohf-gallery ohf-scroll",
   } as const;
 
-  if (items.length === 0 && runs.length === 0) {
+  if (items.length === 0 && runs.length === 0 && uploads.length === 0) {
     return (
       <div {...panel} ref={galleryRef}>
         <Empty view={view} surface={surface} onStarter={onStarter} key={view} />
@@ -382,6 +394,7 @@ export const Gallery = memo(function Gallery({
         scrollRef={galleryRef}
         selecting={selecting}
         runs={runs}
+        uploads={uploads}
         items={items}
         freshIds={freshIds}
         picked={picked}
@@ -391,6 +404,7 @@ export const Gallery = memo(function Gallery({
         onFavorite={onFavorite}
         onDownload={onDownload}
         onDelete={onDelete}
+        onDeleteUpload={onDeleteUpload}
       />
     </div>
   );
@@ -400,6 +414,7 @@ function VirtualizedGrid({
   scrollRef,
   selecting,
   runs,
+  uploads,
   items,
   freshIds,
   picked,
@@ -409,10 +424,12 @@ function VirtualizedGrid({
   onFavorite,
   onDownload,
   onDelete,
+  onDeleteUpload,
 }: {
   scrollRef: RefObject<HTMLDivElement | null>;
   selecting: boolean;
   runs: ActiveRun[];
+  uploads: UploadRecord[];
   items: RunRecord[];
   freshIds: string[];
   picked: ReadonlySet<string>;
@@ -422,9 +439,10 @@ function VirtualizedGrid({
   onFavorite: (item: RunRecord) => void;
   onDownload: (item: RunRecord) => Promise<void>;
   onDelete: (item: RunRecord) => void;
+  onDeleteUpload: (upload: UploadRecord) => Promise<void>;
 }) {
   const width = useInnerWidth(scrollRef);
-  const slots = useMemo(() => slotsOf(runs, items), [runs, items]);
+  const slots = useMemo(() => slotsOf(runs, uploads, items), [runs, uploads, items]);
   const rows = Math.max(1, Math.ceil(slots.length / COLUMNS));
 
   const virtualizer = useVirtualizer({
@@ -462,6 +480,8 @@ function VirtualizedGrid({
             {slice.map((slot) =>
               slot.kind === "run" ? (
                 <RunningTile key={slot.key} run={slot.run} />
+              ) : slot.kind === "upload" ? (
+                <UploadTile key={slot.key} upload={slot.upload} onDelete={onDeleteUpload} />
               ) : (
                 <Tile
                   key={slot.key}
@@ -544,6 +564,122 @@ function Empty({
     </div>
   );
 }
+
+/* A file the visitor brought, as opposed to one a model made. Its only action is
+   the one the rest of the grid cannot offer: taking the file out of the uploads
+   folder. That cannot be undone, so the press asks first — on the card, where
+   the file is, instead of in a dialog that no longer shows it. */
+const UploadTile = memo(function UploadTile({
+  upload,
+  onDelete,
+}: {
+  upload: UploadRecord;
+  onDelete: (upload: UploadRecord) => Promise<void>;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  return (
+    <div
+      className="ohf-tile ohf-tile--upload"
+      onMouseEnter={() => void videoRef.current?.play().catch(() => {})}
+      onMouseLeave={() => {
+        const video = videoRef.current;
+        if (!video) return;
+        video.pause();
+        video.currentTime = 0;
+      }}
+    >
+      {upload.kind === "video" && (
+        <video
+          ref={videoRef}
+          className="ohf-tile-media"
+          src={upload.url}
+          muted
+          loop
+          playsInline
+          preload="metadata"
+        />
+      )}
+      {upload.kind === "image" && (
+        /* A file saved by this studio; next/image would proxy it for nothing. */
+        /* eslint-disable-next-line @next/next/no-img-element */
+        <img
+          className="ohf-tile-media"
+          src={upload.url}
+          alt={upload.name}
+          loading="lazy"
+          onError={(event) => {
+            event.currentTarget.style.visibility = "hidden";
+          }}
+        />
+      )}
+      {upload.kind === "audio" && (
+        <span className="ohf-tile-glyph">
+          <AudioIcon size={28} />
+        </span>
+      )}
+
+      <span className="ohf-tile-badge">Upload</span>
+
+      <span className="ohf-tile-caption">
+        <span className="ohf-tile-prompt">{upload.name}</span>
+        <span className="ohf-tile-facts">
+          <span className="ohf-tile-fact">{upload.kind}</span>
+          <span className="ohf-tile-fact">{timeAgo(upload.createdAt)}</span>
+        </span>
+      </span>
+
+      <div className="ohf-tile-acts">
+        <button
+          type="button"
+          className="ohf-tile-act ohf-tile-act--danger"
+          aria-label={`Delete file — ${upload.name}`}
+          title="Delete file"
+          onClick={() => setConfirming(true)}
+        >
+          <TrashIcon size={15} />
+        </button>
+      </div>
+
+      {confirming && (
+        <div className="ohf-tile-confirm" role="alertdialog" aria-label={`Delete ${upload.name}`}>
+          <span className="ohf-tile-confirm-title">Delete this file?</span>
+          <span className="ohf-tile-confirm-why">
+            It leaves the uploads folder for good and comes off any input it is attached to.
+          </span>
+          <div className="ohf-tile-confirm-acts">
+            <button
+              type="button"
+              className="ohf-btn-quiet"
+              disabled={busy}
+              autoFocus
+              onClick={() => setConfirming(false)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="ohf-btn-solid"
+              disabled={busy}
+              onClick={() => {
+                setBusy(true);
+                void onDelete(upload).finally(() => {
+                  setBusy(false);
+                  setConfirming(false);
+                });
+              }}
+            >
+              {busy ? <span className="ohf-spinner" aria-hidden /> : <TrashIcon size={13} />}
+              Delete file
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+});
 
 function RunningTile({ run }: { run: ActiveRun }) {
   const [elapsed, setElapsed] = useState(0);

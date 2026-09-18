@@ -1,8 +1,17 @@
-import { t2v, videoModel } from "./defaults";
+import { aspect, resolution, seconds } from "./defaults";
+import { ltx25Routes } from "./ltx-2.5-fast";
+import type { ModelEntry } from "./types";
 
-export const ltx25Pro = videoModel(
-  "ltx-2.5-pro",
-  "LTX 2.5 Pro",
-  { start: 1 },
-  t2v("lightricks/ltx-2.5/text-to-video/pro"),
-);
+export const ltx25Pro: ModelEntry = {
+  id: "ltx-2.5-pro",
+  surface: "video",
+  label: "LTX 2.5 Pro",
+  roles: { start: 1, end: 1 },
+  settings: {
+    aspectRatio: aspect(["16:9", "9:16"]),
+    resolution: resolution(["720p", "1080p"], "1080p"),
+    duration: seconds(6, 10, 6, 2),
+    generateAudio: { type: "boolean", default: true },
+  },
+  routes: ltx25Routes("pro"),
+};

@@ -14,7 +14,8 @@ import {
   PlayBadgeIcon,
   UploadIcon,
 } from "./icons";
-import type { UploadRecord } from "./uploads";
+import { pastedFiles } from "./paste";
+import { kindOfFile, type UploadRecord } from "./uploads";
 
 type Source = "uploads" | "generations";
 
@@ -36,7 +37,7 @@ interface Asset {
   art?: string;
 }
 
-/** Everything a role can be filled from: files this browser sent to Blob, and
+/** Everything a role can be filled from: files this browser saved to the uploads folder, and
     the finished runs already in the history. Both are public URLs the plane can
     carry, so the picker treats them as one library cut along two tabs. */
 export function AssetPicker({
@@ -47,6 +48,8 @@ export function AssetPicker({
   staged,
   uploading,
   onUpload,
+  onStage,
+  onError,
   onApply,
   onClose,
 }: {
@@ -59,6 +62,9 @@ export function AssetPicker({
   staged: string | null;
   uploading: boolean;
   onUpload: (role: MediaRole) => void;
+  /** Save pasted files; each one arrives back as `staged`. */
+  onStage: (files: File[]) => Promise<void>;
+  onError: (message: string | null) => void;
   onApply: (role: MediaRole, urls: string[]) => void;
   onClose: () => void;
 }) {
@@ -188,6 +194,31 @@ export function AssetPicker({
     : room > 0
       ? `Upload a ${roleNoun(role, 1)} from this device`
       : `Every ${roleNoun(role, 1)} slot is taken — press one off to free it`;
+
+  /* A paste while the panel is open is an upload into the role it is showing —
+     the same path as its Upload button, so it joins the selection and one press
+     still applies the set. What the role cannot take, or has no room for, is
+     said rather than dropped. */
+  useEffect(() => {
+    const onPaste = (event: ClipboardEvent) => {
+      const files = pastedFiles(event.clipboardData);
+      if (files.length === 0) return;
+      event.preventDefault();
+      const fits = files.filter((file) => kindOfFile(file) === kind);
+      if (fits.length === 0) {
+        onError(`${ROLE_LABELS[role]} takes ${kind} files, not ${kindOfFile(files[0]!)} — switch input first.`);
+        return;
+      }
+      if (uploading) return;
+      if (room === 0) {
+        onError(uploadTip);
+        return;
+      }
+      void onStage(fits.slice(0, room));
+    };
+    document.addEventListener("paste", onPaste);
+    return () => document.removeEventListener("paste", onPaste);
+  }, [kind, role, room, uploading, uploadTip, onStage, onError]);
 
   /* The button states the difference it will make, so a set edited down reads
      as a removal rather than as an "Add" that removes. */
@@ -413,7 +444,7 @@ const AssetTile = memo(function AssetTile({
           <AudioIcon size={20} />
         </span>
       ) : (
-        /* Blob and platform CDN hosts both; next/image would need every
+        /* Local uploads and platform CDN hosts both; next/image would need every
            provider domain allow-listed up front for a 112px thumb. */
         /* eslint-disable-next-line @next/next/no-img-element */
         <img className="ohf-asset-media" src={asset.url} alt="" loading="lazy" />

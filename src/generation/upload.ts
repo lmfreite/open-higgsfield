@@ -1,22 +1,31 @@
-import { put } from "@vercel/blob/client";
-
+/** Sends a file to the project's uploads folder and returns the URL the studio
+    reads it back from. The file only reaches fal when a generation uses it. */
 export async function uploadMedia(file: File): Promise<{ url: string }> {
-  const res = await fetch("/api/blob", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      type: "blob.generate-client-token",
-      payload: { pathname: file.name, clientPayload: null, multipart: false },
-    }),
-  });
-  if (!res.ok) throw new Error("Failed to retrieve the client token");
-  const { clientToken, pathname } = (await res.json()) as {
-    clientToken?: unknown;
-    pathname?: unknown;
-  };
-  if (typeof clientToken !== "string" || typeof pathname !== "string") {
-    throw new Error("Failed to retrieve the client token");
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch("/api/uploads", { method: "POST", body: form });
+  const payload = (await res.json().catch(() => null)) as { url?: unknown; error?: unknown } | null;
+  if (!res.ok) {
+    throw new Error(typeof payload?.error === "string" ? payload.error : `the server answered ${res.status}`);
   }
-  const blob = await put(pathname, file, { access: "public", token: clientToken });
-  return { url: blob.url };
+  if (typeof payload?.url !== "string") throw new Error("the server did not return a file URL");
+  return { url: payload.url };
+}
+
+export type Deletion = { deleted: true } | { deleted: false; note: string };
+
+/** Removes an upload from the project's uploads folder. A URL that is not one of
+    this studio's own — an older Blob-hosted file — has nothing here to delete,
+    and a file saved by another browser is not this one's to delete; both say so
+    instead of failing, so the entry can still leave the library. */
+export async function deleteUpload(url: string): Promise<Deletion> {
+  if (!url.startsWith("/api/uploads/")) {
+    return { deleted: false, note: "the file is hosted outside this project, so it was not deleted" };
+  }
+  const res = await fetch(url, { method: "DELETE" });
+  if (res.status === 403) {
+    return { deleted: false, note: "the file was saved by another browser session and stays in the uploads folder" };
+  }
+  if (!res.ok) throw new Error(`the server answered ${res.status}`);
+  return { deleted: true };
 }

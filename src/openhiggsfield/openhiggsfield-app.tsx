@@ -10,8 +10,10 @@ import { assemblePlane } from "@/generation/plane";
 import type { GenerationStatus } from "@/generation/platform";
 import { POLL_DEADLINE_MS, stopWatching, watchRequest } from "@/generation/poll";
 import { useActive } from "@/generation/stores/active";
+import { useImageMedia, useVideoMedia } from "@/generation/stores/media";
 import { useImagePrompt, useVideoPrompt } from "@/generation/stores/prompt";
 import { useSettings } from "@/generation/stores/settings";
+import { deleteUpload } from "@/generation/upload";
 
 import { GRAIN_URI, artFor } from "./artwork";
 import { Composer } from "./composer";
@@ -30,6 +32,8 @@ import { loadHistory, mergeHistory, replaceRequest, saveHistory, stepRun, type R
 import { CloseIcon, UndoIcon } from "./icons";
 import { SelectionBar, type SaveProgress } from "./selection-bar";
 import { Topbar } from "./topbar";
+import type { UploadRecord } from "./uploads";
+import { useUploads } from "./uploads-store";
 import { Viewer } from "./viewer";
 
 /* Long enough to read the bar and reach it; the drain line states the window. */
@@ -157,6 +161,10 @@ function describeError(caught: unknown): string {
   return `Generation failed — ${message}. Try again; if it repeats, check the key in the sidebar.`;
 }
 
+/* Only the Assets scope shows uploads; the rest are handed one stable empty
+   list so the grid behind them is not re-sliced when a file is saved. */
+const NO_UPLOADS: UploadRecord[] = [];
+
 export function OpenHiggsfieldApp({ fontClassName = "" }: { fontClassName?: string }) {
   const surface = useActive((state) => state.surface);
   const modelId = useActive((state) => state.model);
@@ -181,6 +189,7 @@ export function OpenHiggsfieldApp({ fontClassName = "" }: { fontClassName?: stri
   const [saving, setSaving] = useState<SaveProgress | null>(null);
   const [keyConfigured, setKeyConfigured] = useState(false);
   const [keysOpen, setKeysOpen] = useState(false);
+  const uploads = useUploads((state) => state.records);
 
   const galleryRef = useRef<HTMLDivElement>(null);
   const rangeAnchor = useRef<number | null>(null);
@@ -436,6 +445,25 @@ export function OpenHiggsfieldApp({ fontClassName = "" }: { fontClassName?: stri
 
   const deleteRun = useCallback((record: RunRecord) => deleteRuns([record]), [deleteRuns]);
 
+  /* Takes a file out of the uploads folder, then off the shelf and off every
+     input it is attached to — a plane left holding a deleted file would only
+     fail at Generate. There is no undo bar for this one: the bytes are gone. A
+     file that was not this studio's to delete still leaves the library, and the
+     receipt says the file itself stayed. */
+  const removeUpload = useCallback(async (record: UploadRecord) => {
+    try {
+      const result = await deleteUpload(record.url);
+      useUploads.getState().forget(record.id);
+      for (const media of [useImageMedia.getState(), useVideoMedia.getState()]) {
+        for (const item of media.items) if (item.url === record.url) media.remove(item.id);
+      }
+      if (!result.deleted) setError(`${record.name} left Assets, but ${result.note}.`);
+    } catch (caught) {
+      const reason = caught instanceof Error ? caught.message : String(caught);
+      setError(`Could not delete ${record.name} — ${reason}. It is still in the uploads folder.`);
+    }
+  }, []);
+
   /* History is newest-first by construction, so the restored runs drop back
      into their own places rather than onto the top of the grid. */
   const restoreDeleted = useCallback(() => {
@@ -637,6 +665,7 @@ export function OpenHiggsfieldApp({ fontClassName = "" }: { fontClassName?: stri
             surface={surface}
             items={visible}
             runs={runsHere}
+            uploads={view === "assets" ? uploads : NO_UPLOADS}
             freshIds={freshIds}
             picked={pickedSet}
             onOpen={openViewer}
@@ -645,6 +674,7 @@ export function OpenHiggsfieldApp({ fontClassName = "" }: { fontClassName?: stri
             onFavorite={toggleFavorite}
             onDownload={downloadRun}
             onDelete={deleteRun}
+            onDeleteUpload={removeUpload}
             onStarter={applyStarter}
             galleryRef={galleryRef}
           />

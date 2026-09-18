@@ -1,8 +1,20 @@
-import { t2v, videoModel } from "./defaults";
+import { asString, seconds } from "./defaults";
+import type { ModelEntry } from "./types";
 
-export const minimaxHailuo23 = videoModel(
-  "minimax-hailuo-2.3",
-  "MiniMax Hailuo 2.3",
-  { start: 1 },
-  t2v("minimax/hailuo-2.3/standard/text-to-video"),
-);
+const dials = { duration: asString("duration") };
+
+export const minimaxHailuo23: ModelEntry = {
+  id: "minimax-hailuo-2.3",
+  surface: "video",
+  label: "MiniMax Hailuo 2.3",
+  roles: { start: 1 },
+  settings: { duration: seconds(6, 10, 6, 4) },
+  routes: {
+    text: { path: "fal-ai/minimax/hailuo-2.3/standard/text-to-video", settings: dials },
+    image: {
+      path: "fal-ai/minimax/hailuo-2.3/standard/image-to-video",
+      start: "image_url",
+      settings: dials,
+    },
+  },
+};

@@ -12,6 +12,7 @@ import {
   encodeCredentials,
   parseCredentialInput,
 } from "./credentials";
+import { hostLocalMedia } from "./local-media";
 import { createPlatformClient } from "./platform";
 import type { StatusResult } from "./platform";
 import { toPlatform } from "./to-platform";
@@ -28,7 +29,7 @@ export async function clearPlatformCredentials() {
 }
 
 export async function hasPlatformCredentials() {
-  return (await readStoredCredentials()) !== null;
+  return (await readStoredCredentials()) !== null || Boolean(process.env.FAL_KEY?.trim());
 }
 
 export async function submitGeneration(plane: GenerationPlane) {
@@ -38,7 +39,8 @@ export async function submitGeneration(plane: GenerationPlane) {
     settings: parseSettings(model, plane.settings),
   };
   const { path, body } = toPlatform(parsed);
-  return createPlatformClient(await readCredentials()).submit(path, body);
+  const client = createPlatformClient(await readCredentials());
+  return client.submit(path, await hostLocalMedia(body, client.upload));
 }
 
 /** Every request in flight, answered in one round trip. Next dispatches server
@@ -64,12 +66,22 @@ async function readStoredCredentials() {
   return decodeCredentials(jar.get(PLATFORM_KEY_COOKIE)?.value);
 }
 
+/** A key pasted in the studio wins; FAL_KEY in the server's environment is
+    what every visitor without one falls back on. */
 async function readCredentials() {
-  const stored = await readStoredCredentials();
-  if (!stored) throw new MissingCredentialsError();
-  const baseUrl = process.env.HF_API_BASE_URL;
-  if (!baseUrl) throw new Error("Missing HF_API_BASE_URL");
-  return { ...stored, baseUrl };
+  const credentials = (await readStoredCredentials()) ?? readEnvCredentials();
+  if (!credentials) throw new MissingCredentialsError();
+  return credentials;
+}
+
+function readEnvCredentials() {
+  const apiKey = process.env.FAL_KEY?.trim();
+  if (!apiKey) return null;
+  try {
+    return parseCredentialInput({ apiKey });
+  } catch {
+    throw new Error("FAL_KEY must be id:secret");
+  }
 }
 
 function parseRequestIds(data: unknown): string[] {

@@ -15,6 +15,7 @@ import { PROMPT_PLACEHOLDERS, countSetting } from "./data";
 import type { RunRecord } from "./history";
 import { ArrowUpIcon, CaretDownIcon, CloseIcon, MinusIcon, PlusIcon, WarningIcon } from "./icons";
 import { MediaStrip, useMediaTray } from "./media-tray";
+import { pastedFiles } from "./paste";
 import { ModelIcon, modelIconSrc } from "./model-icon";
 import { ModelPicker } from "./model-picker";
 import { SettingPill, SettingPopover } from "./settings";
@@ -168,6 +169,23 @@ export function Composer({
     if (focusNonce > 0) promptRef.current?.focus();
   }, [focusNonce]);
 
+  /* A picture copied anywhere — a screenshot, "Copy image", a file in the Finder
+     — pastes onto the plane wherever focus is. Text pastes are left alone, and
+     so is any paste while a dialog holds the page. With the picker open the
+     picker takes the paste itself, for the role it is showing: attaching behind
+     its back would be undone the moment it applies its own selection. */
+  useEffect(() => {
+    const onPaste = (event: ClipboardEvent) => {
+      if (overlay === ASSETS || document.querySelector("dialog[open]")) return;
+      const files = pastedFiles(event.clipboardData);
+      if (files.length === 0) return;
+      event.preventDefault();
+      void tray.paste(files);
+    };
+    document.addEventListener("paste", onPaste);
+    return () => document.removeEventListener("paste", onPaste);
+  }, [overlay, tray]);
+
   /* A panel anchored to a control the visitor can no longer see is a stray
      plate — the swap closes whatever the composer had open. */
   useEffect(() => {
@@ -255,6 +273,8 @@ export function Composer({
             staged={tray.staged}
             uploading={tray.uploading}
             onUpload={tray.begin}
+            onStage={tray.stage}
+            onError={onError}
             onApply={tray.apply}
             onClose={() => setOverlay(null)}
           />

@@ -1,7 +1,7 @@
 # OpenHiggsfield AI — Open-Source Alternative to Higgsfield AI
 
 > **The free, open-source alternative to Higgsfield AI.** Generate images and
-> videos with 38 models from one prompt bar — no closed ecosystem, no studio
+> videos with 35 models from one prompt bar — no closed ecosystem, no studio
 > subscription.
 
 ## 🌐 Try it Online — No Install Required
@@ -18,7 +18,7 @@ platform key (`id:secret`) to start generating. The studio itself is free.
 - **Free & open-source** — no studio subscription, no vendor lock-in
 - **Self-hosted** — clone it, run it, change it
 - **Your key** — generate with your own platform key
-- **38 models** — 8 image, 30 video, one catalog, one composer
+- **35 models** — 6 image, 29 video, one catalog, one composer
 
 ---
 
@@ -32,7 +32,7 @@ Next.js 16 App Router on Vercel · React 19 · plain CSS · Zustand · pnpm
 
 - **One composer for Image and Video.** A single prompt bar drives both; the
   model you pick decides image or video. `⌘/Ctrl + Enter` submits.
-- **38 models in the catalog** — 8 image, 30 video: Soul 2, Soul Cinema, Seedance
+- **35 models in the catalog** — 6 image, 29 video, all served by fal.ai: Seedance
   2.5 (Edit / Extend), Seedance 2.0 (Fast / Mini), Kling 3 (Turbo / Std / Pro / 4K / Motion), Wan, Flux,
   Ideogram, Recraft, LTX, MiniMax, PixVerse, Grok, Qwen and more. Searchable
   picker.
@@ -40,8 +40,9 @@ Next.js 16 App Router on Vercel · React 19 · plain CSS · Zustand · pnpm
   audio, batch size, prompt enhancement — each model declares its own allow-list
   and the studio renders exactly that. No parallel hardcoded list.
 - **Media inputs by role.** Start frame, end frame, references, video and audio,
-  each with the per-role cap the model declares. Files upload to Vercel Blob and
-  become public URLs the generate request can carry.
+  each with the per-role cap the model declares. Files are saved to the
+  project's `uploads/` folder and read from there; one is sent to fal's CDN
+  only when a generation uses it.
 - **Asset picker.** Attach from your uploads library or from any finished run in
   history — two tabs over one library, filtered to the role's kind.
 - **Batch.** Up to 4 results per press. Models with a native count setting use it;
@@ -96,8 +97,14 @@ Each generate is one object: `{ model, prompt, media, settings }`.
   no studio changes.
 - **Five small Zustand stores** — shared image/video prompt, shared image/video
   media, `settings[modelId]`, and a tiny `active` store. No store per model.
-- **Uploads** go client-direct to Vercel Blob through `/api/blob`, which issues
-  scoped tokens. `blob:` URLs are preview-only.
+- **Uploads** are posted to `/api/uploads`, which writes them to
+  `uploads/<device>/` and serves them back (with byte ranges, so video seeks).
+  fal cannot read a localhost URL, so the generate action reads the file from
+  disk, puts it on fal's CDN, and swaps the URL into the request — once per
+  file for 30 minutes. `blob:` URLs are preview-only. The **Assets** scope lists
+  every saved upload; deleting one there removes the file from `uploads/` (only
+  from the browser session that saved it), its library entry, and any input it
+  was attached to.
 
 ---
 
@@ -108,13 +115,13 @@ pnpm install
 pnpm dev            # http://localhost:3000
 ```
 
-Open the studio, press **Add key**, and paste your platform key as `id:secret`.
+Open the studio, press **Add key**, and paste your [fal.ai](https://fal.ai/dashboard/keys) key
+as `id:secret` — or set `FAL_KEY` (below) and skip the modal.
 
 ### Environment
 
 ```bash
-HF_API_BASE_URL=                      # generation API origin, server only
-OPEN_HIGGSFIELD_READ_WRITE_TOKEN=     # Vercel Blob read-write token
+FAL_KEY=                              # fal.ai key as id:secret, server only. Optional: a key pasted in the studio wins
 ```
 
 ### Commands
@@ -133,7 +140,7 @@ OPEN_HIGGSFIELD_READ_WRITE_TOKEN=     # Vercel Blob read-write token
 ```
 src/
   app/          /  is the full-viewport studio and the only page
-                /api/blob issues upload tokens
+                /api/uploads saves and serves attachments
                 base.css owns the document canvas
   generation/   generate requests, server actions, API mapping, catalog, stores
   openhiggsfield/

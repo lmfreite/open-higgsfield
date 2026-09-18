@@ -1,4 +1,3 @@
-import { dop } from "./dop";
 import { flux2 } from "./flux-2";
 import { flux3 } from "./flux-3";
 import { grokImagine2 } from "./grok-imagine-2";
@@ -28,7 +27,6 @@ import { qwenImage3 } from "./qwen-image-3";
 import { recraft41 } from "./recraft-4.1";
 import { seedance2, seedance2Fast, seedance2Mini } from "./seedance-2";
 import { seedance25, seedance25Edit, seedance25Extend } from "./seedance-2.5";
-import { soul2, soulCinema } from "./soul";
 import type { ModelEntry } from "./types";
 import { wan26 } from "./wan-2.6";
 import { wan27 } from "./wan-2.7";
@@ -37,8 +35,6 @@ import { wan3Prime } from "./wan-3-prime";
 import { zImageTurbo } from "./z-image-turbo";
 
 export const MODELS: readonly ModelEntry[] = [
-  soul2,
-  soulCinema,
   seedance25,
   seedance25Edit,
   seedance25Extend,
@@ -74,7 +70,6 @@ export const MODELS: readonly ModelEntry[] = [
   ltx25Pro,
   grokImagineVideo15,
   pixverse6,
-  dop,
 ];
 
 export function getModel(id: string): ModelEntry {
@@ -83,5 +78,13 @@ export function getModel(id: string): ModelEntry {
   return model;
 }
 
-export type { GenerationPlane, MediaItem, MediaRole, ModelEntry, PlatformPaths, Surface } from "./types";
+export type {
+  FalRoute,
+  FalRoutes,
+  GenerationPlane,
+  MediaItem,
+  MediaRole,
+  ModelEntry,
+  Surface,
+} from "./types";
 export { parseSettings };

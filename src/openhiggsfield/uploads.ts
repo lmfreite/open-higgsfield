@@ -1,9 +1,10 @@
 import { browserLegacy, defaultKv, type Kv, type LegacyStore } from "./idb";
 import type { AssetKind } from "./data";
 
-/** A file the visitor sent to Blob. The URL is public and permanent, so the
-    library outlives the session that produced it — the same reason run history
-    is kept, and the reason the asset picker can offer both. */
+/** A file the visitor saved to the project's uploads folder. The URL is stable
+    for as long as the file stays there, so the library outlives the session that
+    produced it — the same reason run history is kept, and the reason the asset
+    picker can offer both. */
 export interface UploadRecord {
   id: string;
   url: string;
@@ -16,7 +17,9 @@ export interface UploadRecord {
 
 export const UPLOADS_KEY = "uploads.v1";
 export const LEGACY_UPLOADS_KEY = "openhiggsfield.uploads.v1";
-const MAX_RECORDS = 40;
+/* Generous on purpose: a file past the cap keeps its place on disk but loses its
+   entry, and with it the only button that can delete it. */
+const MAX_RECORDS = 200;
 
 export async function loadUploads(
   kv: Kv = defaultKv(),

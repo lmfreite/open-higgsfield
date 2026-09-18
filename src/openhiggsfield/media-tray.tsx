@@ -7,9 +7,10 @@ import type { MediaItem, MediaRole, ModelEntry } from "@/generation/catalog";
 import { useImageMedia, useVideoMedia } from "@/generation/stores/media";
 import { uploadMedia } from "@/generation/upload";
 
-import { ROLE_ACCEPT, ROLE_LABELS, ROLE_TAGS, rolesOf } from "./data";
+import { ROLE_ACCEPT, ROLE_KINDS, ROLE_LABELS, ROLE_TAGS, rolesOf } from "./data";
 import { AudioIcon, CloseIcon, VideoIcon } from "./icons";
-import { kindOfFile, loadUploads, mergeUploads, rememberUpload, saveUploads, type UploadRecord } from "./uploads";
+import { kindOfFile, type UploadRecord } from "./uploads";
+import { useUploads } from "./uploads-store";
 
 function useMedia(model: ModelEntry) {
   const imageMedia = useImageMedia();
@@ -22,7 +23,7 @@ export interface MediaTray {
   /** The current surface's attachments, so the picker can derive its own caps
       from the same list the strip below renders. */
   items: MediaItem[];
-  /** Every file this browser has sent to Blob, newest first. */
+  /** Every file this browser has saved to the uploads folder, newest first. */
   uploads: UploadRecord[];
   /** The URL of the last file uploaded from the picker. It goes onto the shelf
       and into the panel's selection, not onto the plane — the panel stages the
@@ -30,6 +31,12 @@ export interface MediaTray {
   staged: string | null;
   uploading: boolean;
   allFull: boolean;
+  /** Save files and attach each to the first free slot that takes its kind —
+      what a paste does when nothing is open to receive it. */
+  paste: (files: File[]) => Promise<void>;
+  /** Save files and hand them to the open picker, which selects them for the
+      role it is showing. */
+  stage: (files: File[]) => Promise<void>;
   /** Hidden file input; render it once inside the composer. */
   input: ReactNode;
   /** Set the role the next file takes, then open the OS picker. */
@@ -44,34 +51,21 @@ export function useMediaTray(
   onError: (message: string | null) => void,
 ): MediaTray {
   const media = useMedia(model);
-  const [uploading, setUploading] = useState(false);
-  const [uploads, setUploads] = useState<UploadRecord[]>([]);
+  /* A count, not a flag: a paste of several files saves them one after another,
+     and the spinner should hold across the gaps between them. */
+  const [pending, setPending] = useState(0);
+  const uploading = pending > 0;
+  const uploads = useUploads((state) => state.records);
+  const rememberUpload = useUploads((state) => state.add);
   const [staged, setStaged] = useState<string | null>(null);
-  const [uploadsLoaded, setUploadsLoaded] = useState(false);
   const roleRef = useRef<MediaRole>("reference");
   const inputRef = useRef<HTMLInputElement>(null);
 
-  /* Read once, then write back on every change — the same order history takes,
-     and for the same reason: writing before the read has landed would persist
-     the empty initial value over the stored shelf. */
+  /* The shelf is shared with the Assets grid, which can delete from it: it is
+     read once here, and written back by the store on every change. */
   useEffect(() => {
-    let live = true;
-    void loadUploads()
-      .then((rows) => {
-        if (!live) return;
-        setUploads((current) => mergeUploads(rows, current));
-        setUploadsLoaded(true);
-      })
-      .catch(() => {
-        if (live) setUploadsLoaded(true);
-      });
-    return () => {
-      live = false;
-    };
+    void useUploads.getState().hydrate();
   }, []);
-  useEffect(() => {
-    if (uploadsLoaded) void saveUploads(uploads);
-  }, [uploadsLoaded, uploads]);
 
   const roles = rolesOf(model);
   const counts: Record<string, number> = {};
@@ -80,33 +74,75 @@ export function useMediaTray(
   }
   const allFull = roles.length > 0 && roles.every((role) => counts[role]! >= (model.roles[role] ?? 0));
 
-  async function onFile(file: File | undefined) {
-    if (!file) return;
+  /* Saves one file to the uploads folder and puts it on the shelf. Resolves to
+     its URL, or null when it failed — the error is already on screen. */
+  async function save(file: File): Promise<string | null> {
     onError(null);
-    setUploading(true);
+    setPending((count) => count + 1);
     try {
       const uploaded = await uploadMedia(file);
       /* The file outlives this run: it joins the shelf the picker offers, so a
          reference used once can be reached again without a second upload. */
       setStaged(uploaded.url);
-      setUploads((prev) =>
-        rememberUpload(prev, {
-          id: crypto.randomUUID(),
-          url: uploaded.url,
-          kind: kindOfFile(file),
-          name: file.name,
-          createdAt: Date.now(),
-        }),
-      );
+      rememberUpload({
+        id: crypto.randomUUID(),
+        url: uploaded.url,
+        kind: kindOfFile(file),
+        name: file.name,
+        createdAt: Date.now(),
+      });
+      return uploaded.url;
     } catch (caught) {
       onError(
         caught instanceof Error
-          ? `Upload failed — ${caught.message}. Check the Blob store is configured, then retry.`
+          ? `Upload failed — ${caught.message}. Retry, or generate from the prompt alone.`
           : "Upload failed. Retry, or drop the file and generate from the prompt alone.",
       );
+      return null;
     } finally {
-      setUploading(false);
+      setPending((count) => count - 1);
     }
+  }
+
+  const store = model.surface === "image" ? useImageMedia : useVideoMedia;
+
+  /* Start, then end, then references: the order a person fills a plane in, so a
+     second pasted frame lands on the empty end slot the way the picker's own
+     "advance" does. */
+  function freeRole(file: File): MediaRole | null {
+    const kind = kindOfFile(file);
+    const items = store.getState().items;
+    const fits = (["start", "end", "reference", "video", "audio"] as const).filter(
+      (role) => ROLE_KINDS[role] === kind && (model.roles[role] ?? 0) > 0,
+    );
+    if (fits.length === 0) {
+      onError(`${model.label} does not take ${kind} inputs.`);
+      return null;
+    }
+    const open = fits.find(
+      (role) => items.filter((item) => item.role === role).length < model.roles[role]!,
+    );
+    if (!open) onError(`Every ${kind} slot on ${model.label} is taken — remove one first.`);
+    return open ?? null;
+  }
+
+  async function paste(files: File[]) {
+    for (const file of files) {
+      if (!freeRole(file)) continue;
+      const url = await save(file);
+      /* Asked again once the file is saved: the slot it was promised may have
+         been taken while it travelled. */
+      const role = url ? freeRole(file) : null;
+      if (url && role) store.getState().add({ id: crypto.randomUUID(), url, role });
+    }
+  }
+
+  async function stage(files: File[]) {
+    for (const file of files) await save(file);
+  }
+
+  async function onFile(file: File | undefined) {
+    if (file) await save(file);
   }
 
   /* accept is set on the element rather than through state: the picker opens in
@@ -148,7 +184,19 @@ export function useMediaTray(
     }
   }
 
-  return { roles, items: media.items, uploads, staged, uploading, allFull, input, begin, apply };
+  return {
+    roles,
+    items: media.items,
+    uploads,
+    staged,
+    uploading,
+    allFull,
+    paste,
+    stage,
+    input,
+    begin,
+    apply,
+  };
 }
 
 /** Attached inputs, above the prompt — the frames read before the words do. */
@@ -167,7 +215,7 @@ export function MediaStrip({ model }: { model: ModelEntry }) {
                 {item.role === "audio" ? <AudioIcon size={20} /> : <VideoIcon size={20} />}
               </span>
             ) : (
-              /* Blob-hosted user upload; next/image would proxy an arbitrary
+              /* Locally saved user upload; next/image would proxy an arbitrary
                  remote host for a 56px thumb. */
               /* eslint-disable-next-line @next/next/no-img-element */
               <img
