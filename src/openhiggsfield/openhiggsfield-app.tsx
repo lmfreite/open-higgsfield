@@ -28,8 +28,10 @@ import {
   type GalleryView,
 } from "./data";
 import { Gallery } from "./gallery";
+import { ScriptStudio } from "./scripts";
 import { loadHistory, mergeHistory, replaceRequest, saveHistory, stepRun, type RunRecord } from "./history";
 import { CloseIcon, UndoIcon } from "./icons";
+import { slotFor } from "./media-tray";
 import { SelectionBar, type SaveProgress } from "./selection-bar";
 import { Topbar } from "./topbar";
 import type { UploadRecord } from "./uploads";
@@ -190,6 +192,10 @@ export function OpenHiggsfieldApp({ fontClassName = "" }: { fontClassName?: stri
   const [keyConfigured, setKeyConfigured] = useState(false);
   const [keysOpen, setKeysOpen] = useState(false);
   const uploads = useUploads((state) => state.records);
+  /* A plain receipt for something that worked — a file reused, a file attached.
+     It shares the strip the undo bar uses and fades on its own. */
+  const [hint, setHint] = useState<string | null>(null);
+  const hintTimer = useRef<number | null>(null);
 
   const galleryRef = useRef<HTMLDivElement>(null);
   const rangeAnchor = useRef<number | null>(null);
@@ -428,6 +434,17 @@ export function OpenHiggsfieldApp({ fontClassName = "" }: { fontClassName?: stri
     [setModel, setSettings],
   );
 
+  /* A script goes to the Video prompt and the studio follows it there, so the
+     next thing the visitor does is choose a model and press Generate. */
+  const sendScript = useCallback(
+    (text: string) => {
+      useVideoPrompt.getState().setText(text);
+      switchView("video");
+      setFocusNonce((n) => n + 1);
+    },
+    [switchView],
+  );
+
   const toggleFavorite = useCallback((record: RunRecord) => {
     setHistory((prev) =>
       prev.map((entry) =>
@@ -450,6 +467,35 @@ export function OpenHiggsfieldApp({ fontClassName = "" }: { fontClassName?: stri
      fail at Generate. There is no undo bar for this one: the bytes are gone. A
      file that was not this studio's to delete still leaves the library, and the
      receipt says the file itself stayed. */
+  const flash = useCallback((message: string) => {
+    setHint(message);
+    if (hintTimer.current !== null) clearTimeout(hintTimer.current);
+    hintTimer.current = window.setTimeout(() => setHint(null), 3200);
+  }, []);
+
+  /* A file already in the uploads folder goes onto the plane as it is, into the
+     first slot its kind takes — no second upload, no second copy. The same file
+     is not attached twice. */
+  const attachUpload = useCallback(
+    (record: UploadRecord) => {
+      const entry = getModel(useActive.getState().model);
+      const media = (entry.surface === "image" ? useImageMedia : useVideoMedia).getState();
+      if (media.items.some((item) => item.url === record.url)) {
+        flash(`${record.name} is already attached`);
+        return;
+      }
+      const slot = slotFor(entry, media.items, record.kind);
+      if ("error" in slot) {
+        setError(slot.error);
+        return;
+      }
+      setError(null);
+      media.add({ id: crypto.randomUUID(), url: record.url, role: slot.role });
+      flash(`${record.name} attached to ${entry.label}`);
+    },
+    [flash],
+  );
+
   const removeUpload = useCallback(async (record: UploadRecord) => {
     try {
       const result = await deleteUpload(record.url);
@@ -660,55 +706,69 @@ export function OpenHiggsfieldApp({ fontClassName = "" }: { fontClassName?: stri
             onKeys={openKeys}
           />
 
-          <Gallery
-            view={view}
-            surface={surface}
-            items={visible}
-            runs={runsHere}
-            uploads={view === "assets" ? uploads : NO_UPLOADS}
-            freshIds={freshIds}
-            picked={pickedSet}
-            onOpen={openViewer}
-            onPick={togglePick}
-            onReuse={retry}
-            onFavorite={toggleFavorite}
-            onDownload={downloadRun}
-            onDelete={deleteRun}
-            onDeleteUpload={removeUpload}
-            onStarter={applyStarter}
-            galleryRef={galleryRef}
-          />
-
-          <Composer
-            surface={surface}
-            model={model}
-            generating={busy}
-            error={error}
-            focusNonce={focusNonce}
-            history={history}
-            selecting={selected.length > 0}
-            selection={
-              <SelectionBar
-                records={pickedRecords}
-                saving={saving}
-                onDownload={downloadSelection}
-                onFavorite={favoritePicked}
-                onDelete={deletePicked}
-                onClose={clearPicked}
+          {view === "scripts" ? (
+            <ScriptStudio onUse={sendScript} />
+          ) : (
+            <>
+              <Gallery
+                view={view}
+                surface={surface}
+                items={visible}
+                runs={runsHere}
+                uploads={view === "assets" ? uploads : NO_UPLOADS}
+                freshIds={freshIds}
+                picked={pickedSet}
+                onOpen={openViewer}
+                onPick={togglePick}
+                onReuse={retry}
+                onFavorite={toggleFavorite}
+                onDownload={downloadRun}
+                onDelete={deleteRun}
+                onDeleteUpload={removeUpload}
+                onUseUpload={attachUpload}
+                onStarter={applyStarter}
+                galleryRef={galleryRef}
               />
-            }
-            onError={setError}
-            onGenerate={runGenerate}
-            notice={
-              deleted && (
-                <UndoBar
-                  records={deleted}
-                  onUndo={restoreDeleted}
-                  onDismiss={dismissDeleted}
-                />
-              )
-            }
-          />
+
+              <Composer
+                surface={surface}
+                model={model}
+                generating={busy}
+                error={error}
+                focusNonce={focusNonce}
+                history={history}
+                selecting={selected.length > 0}
+                selection={
+                  <SelectionBar
+                    records={pickedRecords}
+                    saving={saving}
+                    onDownload={downloadSelection}
+                    onFavorite={favoritePicked}
+                    onDelete={deletePicked}
+                    onClose={clearPicked}
+                  />
+                }
+                onError={setError}
+                onNotice={flash}
+                onGenerate={runGenerate}
+                notice={
+                  deleted ? (
+                    <UndoBar
+                      records={deleted}
+                      onUndo={restoreDeleted}
+                      onDismiss={dismissDeleted}
+                    />
+                  ) : (
+                    hint && (
+                      <div className="ohf-undo" role="status">
+                        <span className="ohf-undo-text">{hint}</span>
+                      </div>
+                    )
+                  )
+                }
+              />
+            </>
+          )}
         </main>
 
         {viewerItem && (

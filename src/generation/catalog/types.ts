@@ -1,5 +1,6 @@
 export type Surface = "image" | "video";
-export type MediaRole = "start" | "end" | "reference" | "video" | "audio";
+/** "middle" is a frame between the start and the end — an intermediate one. */
+export type MediaRole = "start" | "middle" | "end" | "reference" | "video" | "audio";
 
 export type MediaItem = {
   id: string;
@@ -29,6 +30,10 @@ export type FalRoute = {
   end?: string;
   /** Field carrying every reference image, as a list. */
   refs?: string;
+  /** Field carrying the start, intermediate and end images together, as one
+      list in that order — for an endpoint that takes an ordered set of pictures
+      rather than named frames. */
+  frames?: string;
   /** Field carrying the first video. */
   video?: string;
   /** Field carrying every video, as a list. */

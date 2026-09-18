@@ -11,7 +11,13 @@ import {
   resolveDeviceId,
   sanitizeFilename,
 } from "@/generation/device";
-import { MAX_UPLOAD_BYTES, UPLOAD_DIR, contentTypeOf, uploadUrl } from "@/generation/local-media";
+import {
+  MAX_UPLOAD_BYTES,
+  UPLOAD_DIR,
+  contentTypeOf,
+  findDuplicate,
+  uploadUrl,
+} from "@/generation/local-media";
 
 // Writes to this machine's disk, so it is for a studio you run yourself. Anyone
 // who can hit this route can fill the folder — gate it when auth exists.
@@ -28,16 +34,29 @@ export async function POST(request: Request): Promise<NextResponse> {
   const jar = await cookies();
   const device = resolveDeviceId(jar.get(DEVICE_COOKIE)?.value);
   const folder = path.join(UPLOAD_DIR, device.deviceId);
+  const data = Buffer.from(await file.arrayBuffer());
   try {
+    /* Already here under some name: the answer is that copy, and nothing is written. */
+    const existing = await findDuplicate(folder, data);
+    if (existing) {
+      console.info("[uploads] reused", { name: existing });
+      return withDeviceCookie(
+        NextResponse.json({ url: uploadUrl(device.deviceId, existing), reused: true }),
+        device,
+      );
+    }
     await mkdir(folder, { recursive: true });
-    await writeFile(path.join(folder, name), Buffer.from(await file.arrayBuffer()));
+    await writeFile(path.join(folder, name), data);
   } catch (error) {
     console.error("[uploads] write failed", error instanceof Error ? error.message : error);
     return withDeviceCookie(fail(500, "Could not write to the uploads folder"), device);
   }
 
   console.info("[uploads] saved", { name, bytes: file.size });
-  return withDeviceCookie(NextResponse.json({ url: uploadUrl(device.deviceId, name) }), device);
+  return withDeviceCookie(
+    NextResponse.json({ url: uploadUrl(device.deviceId, name), reused: false }),
+    device,
+  );
 }
 
 /** The name the file keeps on disk: what it was called, made safe, plus a random

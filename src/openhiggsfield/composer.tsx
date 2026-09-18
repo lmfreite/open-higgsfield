@@ -57,6 +57,7 @@ export function Composer({
   selection,
   selecting,
   onError,
+  onNotice,
   onGenerate,
 }: {
   surface: Surface;
@@ -75,6 +76,8 @@ export function Composer({
   selection: ReactNode;
   selecting: boolean;
   onError: (message: string | null) => void;
+  /* A plain receipt — not a failure — shown in the same strip as the undo bar. */
+  onNotice: (message: string) => void;
   onGenerate: () => void;
 }) {
   const setModel = useActive((state) => state.setModel);
@@ -85,7 +88,7 @@ export function Composer({
   const prompt = surface === "image" ? imagePrompt : videoPrompt;
   const settings = useSettings();
   const values = parseSettings(model, settings.byModel[model.id] ?? {});
-  const tray = useMediaTray(model, onError);
+  const tray = useMediaTray(model, onError, onNotice);
 
   const [overlay, setOverlay] = useState<string | null>(null);
   const [anchor, setAnchor] = useState({ x: 0, y: 0 });

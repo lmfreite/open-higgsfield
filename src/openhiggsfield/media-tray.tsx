@@ -7,7 +7,7 @@ import type { MediaItem, MediaRole, ModelEntry } from "@/generation/catalog";
 import { useImageMedia, useVideoMedia } from "@/generation/stores/media";
 import { uploadMedia } from "@/generation/upload";
 
-import { ROLE_ACCEPT, ROLE_KINDS, ROLE_LABELS, ROLE_TAGS, rolesOf } from "./data";
+import { ROLE_ACCEPT, ROLE_KINDS, ROLE_LABELS, ROLE_TAGS, rolesOf, type AssetKind } from "./data";
 import { AudioIcon, CloseIcon, VideoIcon } from "./icons";
 import { kindOfFile, type UploadRecord } from "./uploads";
 import { useUploads } from "./uploads-store";
@@ -25,10 +25,11 @@ export interface MediaTray {
   items: MediaItem[];
   /** Every file this browser has saved to the uploads folder, newest first. */
   uploads: UploadRecord[];
-  /** The URL of the last file uploaded from the picker. It goes onto the shelf
-      and into the panel's selection, not onto the plane — the panel stages the
-      whole set and one press applies it. */
-  staged: string | null;
+  /** The last file uploaded from the picker. It goes onto the shelf and into the
+      panel's selection, not onto the plane — the panel stages the whole set and
+      one press applies it. The nonce is what tells a file saved again from one
+      that was already there: the same URL twice is still a new arrival. */
+  staged: { url: string; nonce: number } | null;
   uploading: boolean;
   allFull: boolean;
   /** Save files and attach each to the first free slot that takes its kind —
@@ -46,9 +47,29 @@ export interface MediaTray {
   apply: (role: MediaRole, urls: string[]) => void;
 }
 
+export type Slot = { role: MediaRole } | { error: string };
+
+/** Where a file of this kind goes on the plane: the first slot it fits, in the
+    order the model declares them — a model that lists start, intermediate, end
+    fills in time order, so a run of pasted frames lands where the picker's own
+    "advance" would take them. Or why it cannot. */
+export function slotFor(model: ModelEntry, items: MediaItem[], kind: AssetKind): Slot {
+  const fits = rolesOf(model).filter(
+    (role) => ROLE_KINDS[role] === kind && (model.roles[role] ?? 0) > 0,
+  );
+  if (fits.length === 0) return { error: `${model.label} does not take ${kind} inputs.` };
+  const open = fits.find(
+    (role) => items.filter((item) => item.role === role).length < model.roles[role]!,
+  );
+  return open
+    ? { role: open }
+    : { error: `Every ${kind} slot on ${model.label} is taken — remove one first.` };
+}
+
 export function useMediaTray(
   model: ModelEntry,
   onError: (message: string | null) => void,
+  onNotice: (message: string) => void,
 ): MediaTray {
   const media = useMedia(model);
   /* A count, not a flag: a paste of several files saves them one after another,
@@ -57,7 +78,7 @@ export function useMediaTray(
   const uploading = pending > 0;
   const uploads = useUploads((state) => state.records);
   const rememberUpload = useUploads((state) => state.add);
-  const [staged, setStaged] = useState<string | null>(null);
+  const [staged, setStaged] = useState<{ url: string; nonce: number } | null>(null);
   const roleRef = useRef<MediaRole>("reference");
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -75,15 +96,17 @@ export function useMediaTray(
   const allFull = roles.length > 0 && roles.every((role) => counts[role]! >= (model.roles[role] ?? 0));
 
   /* Saves one file to the uploads folder and puts it on the shelf. Resolves to
-     its URL, or null when it failed — the error is already on screen. */
+     its URL, or null when it failed — the error is already on screen. A file the
+     folder already holds comes back as that copy, and the visitor is told. */
   async function save(file: File): Promise<string | null> {
     onError(null);
     setPending((count) => count + 1);
     try {
       const uploaded = await uploadMedia(file);
+      if (uploaded.reused) onNotice("Already in your uploads — reusing that copy, nothing new was saved");
       /* The file outlives this run: it joins the shelf the picker offers, so a
          reference used once can be reached again without a second upload. */
-      setStaged(uploaded.url);
+      setStaged((prev) => ({ url: uploaded.url, nonce: (prev?.nonce ?? 0) + 1 }));
       rememberUpload({
         id: crypto.randomUUID(),
         url: uploaded.url,
@@ -106,34 +129,30 @@ export function useMediaTray(
 
   const store = model.surface === "image" ? useImageMedia : useVideoMedia;
 
-  /* Start, then end, then references: the order a person fills a plane in, so a
-     second pasted frame lands on the empty end slot the way the picker's own
-     "advance" does. */
   function freeRole(file: File): MediaRole | null {
-    const kind = kindOfFile(file);
-    const items = store.getState().items;
-    const fits = (["start", "end", "reference", "video", "audio"] as const).filter(
-      (role) => ROLE_KINDS[role] === kind && (model.roles[role] ?? 0) > 0,
-    );
-    if (fits.length === 0) {
-      onError(`${model.label} does not take ${kind} inputs.`);
+    const slot = slotFor(model, store.getState().items, kindOfFile(file));
+    if ("error" in slot) {
+      onError(slot.error);
       return null;
     }
-    const open = fits.find(
-      (role) => items.filter((item) => item.role === role).length < model.roles[role]!,
-    );
-    if (!open) onError(`Every ${kind} slot on ${model.label} is taken — remove one first.`);
-    return open ?? null;
+    return slot.role;
   }
 
   async function paste(files: File[]) {
     for (const file of files) {
       if (!freeRole(file)) continue;
       const url = await save(file);
+      if (!url) continue;
+      /* The same file twice on one plane is nearly always a slip, and a reused
+         copy makes it easy to make: it is left where it is. */
+      if (store.getState().items.some((item) => item.url === url)) {
+        onNotice("That file is already attached");
+        continue;
+      }
       /* Asked again once the file is saved: the slot it was promised may have
          been taken while it travelled. */
-      const role = url ? freeRole(file) : null;
-      if (url && role) store.getState().add({ id: crypto.randomUUID(), url, role });
+      const role = freeRole(file);
+      if (role) store.getState().add({ id: crypto.randomUUID(), url, role });
     }
   }
 

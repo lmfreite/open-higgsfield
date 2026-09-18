@@ -39,10 +39,15 @@ Next.js 16 App Router on Vercel · React 19 · plain CSS · Zustand · pnpm
 - **Per-model settings.** Aspect ratio, resolution, duration, output format,
   audio, batch size, prompt enhancement — each model declares its own allow-list
   and the studio renders exactly that. No parallel hardcoded list.
-- **Media inputs by role.** Start frame, end frame, references, video and audio,
+- **Media inputs by role.** Start frame, intermediate frames, end frame, references, video and audio,
   each with the per-role cap the model declares. Files are saved to the
   project's `uploads/` folder and read from there; one is sent to fal's CDN
   only when a generation uses it.
+- **Scripts.** A writing room beside Image and Video: describe the idea, and any
+  OpenAI-compatible model writes the script — base URL, model and instructions
+  are set in the room's Connection card (OpenAI, Anthropic's `/v1` compatibility
+  layer, OpenRouter, a local Ollama). Scripts are editable, can be saved, and a
+  selected scene goes to the Video prompt in one press.
 - **Asset picker.** Attach from your uploads library or from any finished run in
   history — two tabs over one library, filtered to the role's kind.
 - **Batch.** Up to 4 results per press. Models with a native count setting use it;
@@ -101,10 +106,12 @@ Each generate is one object: `{ model, prompt, media, settings }`.
   `uploads/<device>/` and serves them back (with byte ranges, so video seeks).
   fal cannot read a localhost URL, so the generate action reads the file from
   disk, puts it on fal's CDN, and swaps the URL into the request — once per
-  file for 30 minutes. `blob:` URLs are preview-only. The **Assets** scope lists
-  every saved upload; deleting one there removes the file from `uploads/` (only
-  from the browser session that saved it), its library entry, and any input it
-  was attached to.
+  file for 30 minutes. `blob:` URLs are preview-only. A file whose bytes are
+  already in `uploads/` — pasted or picked again, under any name — reuses that
+  copy instead of saving another. The **Assets** scope lists every saved upload:
+  **Use as input** attaches one without uploading it again, and deleting one
+  removes the file from `uploads/` (only from the browser session that saved
+  it), its library entry, and any input it was attached to.
 
 ---
 
@@ -122,6 +129,7 @@ as `id:secret` — or set `FAL_KEY` (below) and skip the modal.
 
 ```bash
 FAL_KEY=                              # fal.ai key as id:secret, server only. Optional: a key pasted in the studio wins
+SCRIPT_API_KEY=                       # key for the Scripts model (any OpenAI-compatible API). Optional: a key saved in the studio wins
 ```
 
 ### Commands

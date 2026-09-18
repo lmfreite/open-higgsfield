@@ -16,6 +16,7 @@ import {
   DownloadIcon,
   HeartIcon,
   PlayBadgeIcon,
+  PlusIcon,
   RetryIcon,
   TrashIcon,
   WarningIcon,
@@ -35,6 +36,11 @@ const EMPTY: Record<GalleryView, { title: string; hint: string }> = {
   assets: {
     title: "Nothing here yet",
     hint: "Files you upload or paste, and every image and video run, land in this grid and stay in this browser.",
+  },
+  /* The writing room never shows this grid; the entry keeps the record whole. */
+  scripts: {
+    title: "Write a script first",
+    hint: "Scripts have their own room — open it from the scope bar.",
   },
   favorites: {
     title: "Nothing kept yet",
@@ -350,6 +356,7 @@ export const Gallery = memo(function Gallery({
   onDownload,
   onDelete,
   onDeleteUpload,
+  onUseUpload,
   onStarter,
   galleryRef,
 }: {
@@ -368,6 +375,7 @@ export const Gallery = memo(function Gallery({
   onDownload: (item: RunRecord) => Promise<void>;
   onDelete: (item: RunRecord) => void;
   onDeleteUpload: (upload: UploadRecord) => Promise<void>;
+  onUseUpload: (upload: UploadRecord) => void;
   onStarter: (prompt: string) => void;
   galleryRef: RefObject<HTMLDivElement | null>;
 }) {
@@ -405,6 +413,7 @@ export const Gallery = memo(function Gallery({
         onDownload={onDownload}
         onDelete={onDelete}
         onDeleteUpload={onDeleteUpload}
+        onUseUpload={onUseUpload}
       />
     </div>
   );
@@ -425,6 +434,7 @@ function VirtualizedGrid({
   onDownload,
   onDelete,
   onDeleteUpload,
+  onUseUpload,
 }: {
   scrollRef: RefObject<HTMLDivElement | null>;
   selecting: boolean;
@@ -440,6 +450,7 @@ function VirtualizedGrid({
   onDownload: (item: RunRecord) => Promise<void>;
   onDelete: (item: RunRecord) => void;
   onDeleteUpload: (upload: UploadRecord) => Promise<void>;
+  onUseUpload: (upload: UploadRecord) => void;
 }) {
   const width = useInnerWidth(scrollRef);
   const slots = useMemo(() => slotsOf(runs, uploads, items), [runs, uploads, items]);
@@ -481,7 +492,12 @@ function VirtualizedGrid({
               slot.kind === "run" ? (
                 <RunningTile key={slot.key} run={slot.run} />
               ) : slot.kind === "upload" ? (
-                <UploadTile key={slot.key} upload={slot.upload} onDelete={onDeleteUpload} />
+                <UploadTile
+                  key={slot.key}
+                  upload={slot.upload}
+                  onUse={onUseUpload}
+                  onDelete={onDeleteUpload}
+                />
               ) : (
                 <Tile
                   key={slot.key}
@@ -571,9 +587,11 @@ function Empty({
    the file is, instead of in a dialog that no longer shows it. */
 const UploadTile = memo(function UploadTile({
   upload,
+  onUse,
   onDelete,
 }: {
   upload: UploadRecord;
+  onUse: (upload: UploadRecord) => void;
   onDelete: (upload: UploadRecord) => Promise<void>;
 }) {
   const [confirming, setConfirming] = useState(false);
@@ -640,6 +658,17 @@ const UploadTile = memo(function UploadTile({
           onClick={() => setConfirming(true)}
         >
           <TrashIcon size={15} />
+        </button>
+        {/* Reuse, not re-upload: the file is already here, so it goes onto the
+            plane as it is. */}
+        <button
+          type="button"
+          className="ohf-tile-act"
+          aria-label={`Use as input — ${upload.name}`}
+          title="Use as input"
+          onClick={() => onUse(upload)}
+        >
+          <PlusIcon size={15} />
         </button>
       </div>
 

@@ -7,17 +7,20 @@ export const SURFACE_LABELS: Record<Surface, string> = {
   video: "Video",
 };
 
-/** What the gallery is scoped to. "assets" is every run, both surfaces;
-    "favorites" is every run the visitor kept, both surfaces. */
-export type GalleryView = Surface | "assets" | "favorites";
+/** What the studio is scoped to. "assets" is every run and upload, both
+    surfaces; "favorites" is every run the visitor kept, both surfaces;
+    "scripts" is not a gallery at all but the writing room, which takes the
+    grid's place. */
+export type GalleryView = Surface | "assets" | "favorites" | "scripts";
 
 /** Scopes that span both surfaces, so switching to them leaves the model alone. */
-export const CROSS_VIEWS = new Set<GalleryView>(["assets", "favorites"]);
+export const CROSS_VIEWS = new Set<GalleryView>(["assets", "favorites", "scripts"]);
 
-export const VIEWS: readonly GalleryView[] = ["image", "video", "assets", "favorites"];
+export const VIEWS: readonly GalleryView[] = ["image", "video", "scripts", "assets", "favorites"];
 
 export const VIEW_LABELS: Record<GalleryView, string> = {
   ...SURFACE_LABELS,
+  scripts: "Scripts",
   assets: "Assets",
   favorites: "Favorites",
 };
@@ -121,6 +124,7 @@ export function settingValueLabel(key: string, value: unknown): string {
 
 export const ROLE_LABELS: Record<MediaRole, string> = {
   start: "Start frame",
+  middle: "Intermediate frame",
   end: "End frame",
   reference: "Reference",
   video: "Video",
@@ -130,6 +134,7 @@ export const ROLE_LABELS: Record<MediaRole, string> = {
 /* Slate tags for the attachment tiles, where the full label will not fit. */
 export const ROLE_TAGS: Record<MediaRole, string> = {
   start: "START",
+  middle: "MID",
   end: "END",
   reference: "REF",
   video: "VIDEO",
@@ -142,6 +147,7 @@ export type AssetKind = "image" | "video" | "audio";
 
 export const ROLE_KINDS: Record<MediaRole, AssetKind> = {
   start: "image",
+  middle: "image",
   end: "image",
   reference: "image",
   video: "video",
@@ -152,6 +158,7 @@ export const ROLE_KINDS: Record<MediaRole, AssetKind> = {
    "Add start frame" — so each role carries its plural rather than taking an s. */
 const ROLE_PLURALS: Record<MediaRole, string> = {
   start: "start frames",
+  middle: "intermediate frames",
   end: "end frames",
   reference: "references",
   video: "clips",
@@ -165,6 +172,7 @@ export function roleNoun(role: MediaRole, count: number): string {
 /* Mirrors UPLOAD_TYPES in src/generation/local-media.ts. */
 export const ROLE_ACCEPT: Record<MediaRole, string> = {
   start: "image/jpeg,image/png,image/webp,image/gif",
+  middle: "image/jpeg,image/png,image/webp,image/gif",
   end: "image/jpeg,image/png,image/webp,image/gif",
   reference: "image/jpeg,image/png,image/webp,image/gif",
   video: "video/mp4",
@@ -204,6 +212,7 @@ export function ratioToCss(value: unknown, fallback: string): string {
    phrases dedupe before they are listed. */
 const ROLE_PHRASES: Record<MediaRole, string> = {
   start: "frames",
+  middle: "frames",
   end: "frames",
   reference: "references",
   video: "clips",

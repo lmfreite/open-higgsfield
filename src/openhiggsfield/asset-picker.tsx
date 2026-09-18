@@ -59,7 +59,7 @@ export function AssetPicker({
   items: MediaItem[];
   uploads: UploadRecord[];
   history: RunRecord[];
-  staged: string | null;
+  staged: { url: string; nonce: number } | null;
   uploading: boolean;
   onUpload: (role: MediaRole) => void;
   /** Save pasted files; each one arrives back as `staged`. */
@@ -130,10 +130,17 @@ export function AssetPicker({
      slot instead of closing, so the second frame is one more click, not a
      reopen plus a confirm. */
   function advanceOrClose(filled: MediaRole) {
-    if (filled === "start" && (model.roles.end ?? 0) > 0) {
-      const endUsed = items.filter((item) => item.role === "end").length;
-      if (endUsed < (model.roles.end ?? 0)) {
-        pickRole("end");
+    if (filled === "start" || filled === "middle") {
+      const order = rolesOf(model);
+      const next = order
+        .slice(order.indexOf(filled) + 1)
+        .find(
+          (entry) =>
+            (entry === "middle" || entry === "end") &&
+            items.filter((item) => item.role === entry).length < (model.roles[entry] ?? 0),
+        );
+      if (next) {
+        pickRole(next);
         return;
       }
     }
@@ -153,11 +160,11 @@ export function AssetPicker({
     if (staged === null || staged === seen.current) return;
     seen.current = staged;
     if (max === 1) {
-      setSelected([staged]);
-      commit([staged]);
+      setSelected([staged.url]);
+      commit([staged.url]);
       return;
     }
-    setSelected((prev) => (prev.includes(staged) ? prev : [...prev, staged]));
+    setSelected((prev) => (prev.includes(staged.url) ? prev : [...prev, staged.url]));
   }, [staged]);
 
   function toggle(url: string) {

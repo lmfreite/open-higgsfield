@@ -38,7 +38,13 @@ export const useUploads = create<UploadsState>()((set, get) => {
       return hydrating;
     },
     add: (record) => {
-      set((state) => ({ records: rememberUpload(state.records, record) }));
+      set((state) => {
+        /* The same file saved again is the entry it already was — its id and the
+           name it was first given — moved to the front, not a second one. */
+        const prior = state.records.find((entry) => entry.url === record.url);
+        const next = prior ? { ...record, id: prior.id, name: prior.name } : record;
+        return { records: rememberUpload(state.records, next) };
+      });
       persist();
     },
     forget: (id) => {

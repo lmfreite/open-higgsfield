@@ -1,4 +1,4 @@
-import { readFile, stat } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
 /** Files the visitor attaches live in this folder of the project, one folder per
@@ -40,6 +40,31 @@ export function uploadPath(url: string): string | null {
 
 export function contentTypeOf(filename: string): string | undefined {
   return UPLOAD_TYPES[path.extname(filename).toLowerCase()];
+}
+
+/** The file already in `folder` that holds exactly these bytes, or null. Saving
+    the same picture twice — a second paste, the same file picked again under
+    another name — should land on the copy already there instead of stacking a
+    second one. Sizes are compared first, so only a file of the same length is
+    ever read back. */
+export async function findDuplicate(folder: string, data: Buffer): Promise<string | null> {
+  let names: string[];
+  try {
+    names = await readdir(folder);
+  } catch {
+    return null;
+  }
+  for (const name of names) {
+    if (!contentTypeOf(name)) continue;
+    const file = path.join(folder, name);
+    try {
+      if ((await stat(file)).size !== data.length) continue;
+      if (data.equals(await readFile(file))) return name;
+    } catch {
+      /* gone between the listing and the read */
+    }
+  }
+  return null;
 }
 
 export type Host = (data: Buffer, contentType: string, filename: string) => Promise<string>;

@@ -19,9 +19,12 @@ function urls(plane: GenerationPlane, role: MediaRole): string[] {
 
 /** The media the plane carries decides the endpoint: a start or end image takes
     the image route, references and videos the reference route, nothing the text
-    route. A model whose only route does not match still gets it, so fal names
+    route. Intermediate frames outrank both — no image endpoint has a place for
+    them, so a plane that carries any goes to the route that takes a whole set of
+    pictures. A model whose only route does not match still gets it, so fal names
     what is missing instead of the studio guessing. */
 function pickRoute(plane: GenerationPlane, { text, image, reference }: FalRoutes) {
+  if (urls(plane, "middle").length > 0 && reference) return reference;
   const framed = urls(plane, "start").length > 0 || urls(plane, "end").length > 0;
   const referenced =
     urls(plane, "reference").length > 0 ||
@@ -53,6 +56,10 @@ function bodyFor(plane: GenerationPlane, route: FalRoute): Record<string, unknow
   single(route.end, "end");
   single(route.video, "video");
   list(route.refs, "reference");
+  if (route.frames) {
+    const frames = [...urls(plane, "start"), ...urls(plane, "middle"), ...urls(plane, "end")];
+    if (frames.length > 0) body[route.frames] = frames;
+  }
   list(route.videos, "video");
   list(route.audios, "audio");
   return body;

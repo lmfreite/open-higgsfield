@@ -62,6 +62,17 @@ export function AssetsIcon({ size = 16 }: IconProps) {
   );
 }
 
+export function ScriptIcon({ size = 16 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <path d="M9.4 1.9H4.6a1.7 1.7 0 0 0-1.7 1.7v8.8a1.7 1.7 0 0 0 1.7 1.7h6.8a1.7 1.7 0 0 0 1.7-1.7V5.6Z" />
+      <path d="M9.4 1.9v2.9a.8.8 0 0 0 .8.8h2.9" />
+      <path d="M5.5 8.7h5" />
+      <path d="M5.5 11.2h3.3" />
+    </svg>
+  );
+}
+
 export function KeyIcon({ size = 15 }: IconProps) {
   return (
     <svg {...base(size)}>
